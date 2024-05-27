@@ -338,7 +338,7 @@ class KitchenEnv(GoalEnv, EzPickle):
             object_noise_ratio,
             **kwargs,
         )
-
+        
     def compute_reward(
         self,
         achieved_goal: "dict[str, np.ndarray]",
@@ -422,3 +422,48 @@ class KitchenEnv(GoalEnv, EzPickle):
 
     def close(self):
         self.robot_env.close()
+
+    def get_joint_names(self):
+        return [self.model.names[self.model.name_jntadr[joint_id]:].decode('utf-8').split('\x00', 1)[0] for joint_id in range(self.model.njnt)]
+
+    def get_body_names(self):
+        return [self.model.names[self.model.name_bodyadr[body_id]:].decode('utf-8').split('\x00', 1)[0] for body_id in range(self.model.nbody)]
+
+    def get_geom_names(self):
+        return [self.model.names[self.model.name_geomadr[geom_id]:].decode('utf-8').split('\x00', 1)[0] for geom_id in range(self.model.ngeom)]
+
+    def get_actuator_names(self):
+        return [self.model.names[self.model.name_actuatoradr[actuator_id]:].decode('utf-8').split('\x00', 1)[0] for actuator_id in range(self.model.nu)]
+
+    def find_body_id(self, body_name):
+        for body_id in range(self.model.nbody):
+            name_bytes = self.model.names[self.model.name_bodyadr[body_id]:]
+            name_str = name_bytes.decode('utf-8').split('\x00', 1)[0]
+            if name_str == body_name:
+                return body_id
+        raise ValueError(f"Body name '{body_name}' not found")
+
+    def set_body_position(self, body_name, new_position):
+        body_id = self.find_body_id(body_name)
+        # Find the joint associated with the body
+        joint_id = None
+        for j in range(self.model.njnt):
+            if self.model.jnt_bodyid[j] == body_id:
+                joint_id = j
+                break
+
+        if joint_id is None:
+            raise ValueError(f"No joint associated with body name '{body_name}'")
+
+        # Check if the joint is a free joint
+        if self.model.jnt_type[joint_id] != 0:
+            raise ValueError(f"Joint associated with body name '{body_name}' is not a free joint")
+
+        # Set the new position
+        qpos_start = self.model.jnt_qposadr[joint_id]
+        self.data.qpos[qpos_start:qpos_start + 3] = new_position
+        # Step a 0-action to make the simulation update according to the new
+        # position.
+        for _ in range(10):
+            self.step(np.zeros(self.action_space.shape))
+
